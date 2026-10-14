@@ -215,6 +215,15 @@ To move the pin, set `HOST_REF` in `.env` and refresh the overlay files so they 
 
 ---
 
+## Upstream contributions
+
+Page-side fixes from `overlay/` (firmware/UA detection, real rejection text, `force-ready` fallback, `<base href="/">`) are offered upstream as:
+
+- Fork: [ThatRetiredDude/WAK1360-Relapse](https://github.com/ThatRetiredDude/WAK1360-Relapse)
+- PR: [arg0WAK/WAK1360-Relapse#1](https://github.com/arg0WAK/WAK1360-Relapse/pull/1)
+
+Hosting pieces in this repo (DNS, nginx, Unraid, ftpsrv wiring) stay here and are not part of that PR.
+
 ## Credits
 
 - Relapse exploit chain: Sonic_Iso, Jordy, ntfargo, ufm42, Dr. Yenyen, and others listed in [ntfargo/Relapse-Exploit](https://github.com/ntfargo/Relapse-Exploit)
