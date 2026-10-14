@@ -2,12 +2,13 @@
 
 Package a home-server DNS + HTTPS host for the **PS5 Relapse** exploit chain (firmware **7.00–13.60**), so the console’s **User’s Guide** loads your page instead of Sony’s manual.
 
-This repository **does not** vendor exploit code, payloads, certificates, or keys. It clones an upstream host page at setup time and applies a small compatibility patch.
+This repository **does not** vendor exploit code, payloads, certificates, or keys. It clones an upstream host page at setup time and applies a small overlay that matches a known-good working page.
 
 Upstream projects:
 
 - [ntfargo/Relapse-Exploit](https://github.com/ntfargo/Relapse-Exploit) — exploit chain
-- [arg0WAK/WAK1360-Relapse](https://github.com/arg0WAK/WAK1360-Relapse) — UI host page (default clone target)
+- [arg0WAK/WAK1360-Relapse](https://github.com/arg0WAK/WAK1360-Relapse) — UI host page (default clone target, pinned commit)
+- [ps5-payload-dev/ftpsrv](https://github.com/ps5-payload-dev/ftpsrv) — optional FTP payload (`ftpsrv-ps5.elf`)
 
 > **Disclaimer.** Educational / security-research use on devices you own. Jailbreaking can brick hardware, void warranties, and violate terms of service. You assume the risk.
 
@@ -30,7 +31,7 @@ PS5 opens User’s Guide (HTTPS)
 
 1. **dnsmasq** answers authoritative A records for the User’s Guide hostnames and black-holes Sony update domains so the console stays on its current firmware.
 2. **nginx** serves the host page on **80 and 443** with a self-signed cert for `manuals.playstation.net`.
-3. A tiny patch on `index.html` makes the page survive the PS5 browser’s deep paths and aggressive caching.
+3. An **overlay** on top of pinned WAK1360 makes the page survive deep User’s Guide paths, aggressive caching, and UA quirks.
 
 ---
 
@@ -39,7 +40,7 @@ PS5 opens User’s Guide (HTTPS)
 - Linux host with Docker + Compose v2 (dnsmasq uses `network_mode: host`)
 - Free **UDP/TCP 53**, **TCP 80**, **TCP 443** on that host
 - Ability to set the PS5’s DNS (and ideally your LAN DHCP DNS) to `SERVER_IP`
-- `git`, `python3`, `openssl`
+- `git`, `python3`, `openssl`, `curl` (or `wget`)
 
 macOS / Docker Desktop can build and validate configs, but host-network DNS will not behave the same; run the stack on a Linux box on your LAN.
 
@@ -56,7 +57,8 @@ cp .env.example .env
 
 ./scripts/render-config.sh   # dnsmasq.conf + nginx/default.conf
 ./scripts/generate-cert.sh   # certs/manuals.{crt,key}
-./scripts/setup-host.sh      # clone upstream into www/ + patch index.html
+./scripts/setup-host.sh      # clone pinned WAK1360 → www/ + apply overlay
+./scripts/add-ftpsrv.sh      # optional: official ftpsrv-ps5.elf + payloads.json entry
 
 docker compose up -d
 ./scripts/verify.sh
@@ -76,108 +78,131 @@ Set your router’s DHCP DNS to `SERVER_IP` so every device (including the PS5) 
 
 1. Confirm firmware is in the supported range (7.00–13.60) and stays there (update hosts are blocked).
 2. Open **User’s Guide** (the book icon). You should see the Relapse / WAK host page, not Sony’s manual.
-3. Press **START**. After a successful run, use **PAYLOADS** (OnionHEN, ShadowMount+, FTP, ProsperoStore, etc., depending on what upstream ships / you add).
+3. Press **START**. After a successful run, use **PAYLOADS** (OnionHEN, ShadowMount+, FTP, ProsperoStore, etc.).
+
+---
+
+## Overlay (what `setup-host.sh` applies)
+
+Default `HOST_REF` pins [WAK1360-Relapse](https://github.com/arg0WAK/WAK1360-Relapse) at commit `b2398fd5bea116f990595e0a187ae94d8c6db43d`. Files under `overlay/` are copied on top:
+
+| File | Purpose |
+|------|---------|
+| `overlay/index.html` | `<base href="/">`, `?v=4` cache-bust on **all** scripts, includes `force-ready.js` |
+| `overlay/src/firmware.js` | More tolerant UA / firmware detection + clearer rejection text |
+| `overlay/src/helper.js` | Logs UA; shows the real rejection string when incompatible |
+| `overlay/src/force-ready.js` | Marks the UI READY when the UA looks like a PlayStation |
+
+`overlay/payloads.json` (with the FTP Server entry) is applied by `scripts/add-ftpsrv.sh`, not by `setup-host.sh`.
+
+---
+
+## Optional: FTP payload
+
+```bash
+./scripts/add-ftpsrv.sh
+```
+
+Downloads [`ftpsrv-ps5.elf`](https://github.com/ps5-payload-dev/ftpsrv/releases/download/v0.21.1/ftpsrv-ps5.elf) from the official [ps5-payload-dev/ftpsrv](https://github.com/ps5-payload-dev/ftpsrv) **v0.21.1** release, verifies SHA-256 `7d4b31c8…`, installs it into `www/payloads/`, and writes `payloads.json` with the FTP Server entry (port **2121**). The ELF is **never** committed to this repo.
+
+If the release URL is unreachable, download that asset by hand into `www/payloads/ftpsrv-ps5.elf` and copy `overlay/payloads.json` over `www/payloads/payloads.json`.
 
 ---
 
 ## The gotchas (why this package exists)
 
-These are the things generic “run `serve.py`” instructions leave out.
-
 ### 1. HTTPS on port 443
 
-The User’s Guide loads over **HTTPS**. Serving only port 80 is not enough. This stack terminates TLS with a self-signed cert whose CN/SAN is `manuals.playstation.net`.
+The User’s Guide loads over **HTTPS**. Serving only port 80 is not enough.
 
 ### 2. SPA fallback silently kills `firmware.js`
 
-If nginx (or any static host) is configured as a single-page app —
-
-```nginx
-location / { try_files $uri $uri/ /index.html; }
-```
-
-— then a **missing or mis-pathed** `firmware.js` returns **`index.html` with HTTP 200**. The browser tries to execute HTML as JavaScript, the exploit dies, and logs look fine.
-
-**Fix:** make `.js` / `.css` return a real 404:
-
-```nginx
-location ~* \.(js|css)$ { try_files $uri =404; }
-```
+If nginx falls back to `index.html` for missing `.js` files, a bad path returns HTML with HTTP 200 and the exploit dies silently. This package makes `.js` / `.css` return a real **404**.
 
 ### 3. Deep User’s Guide paths need a `<base href>`
 
-The Guide opens URLs like `/document/en/ps5/…`. Relative assets (`./src/firmware.js`, `./assets/…`) then resolve under that deep path and 404 (or hit the SPA trap above).
-
-**Fix:** in `index.html` `<head>`:
-
-```html
-<base href="/">
-```
-
-`scripts/setup-host.sh` inserts this automatically.
+The Guide opens URLs like `/document/en/ps5/…`. The overlay’s `index.html` includes `<base href="/">`.
 
 ### 4. The PS5 browser caches aggressively
 
-A once-broken `firmware.js` can stick around. This package:
-
-- sends `Cache-Control: no-store` from nginx
-- adds a `?v=…` cache-buster on the `firmware.js` script tag
-
-Bump `CACHE_BUST` (env) or re-run `setup-host.sh` after you change the page.
+nginx sends `Cache-Control: no-store`, and the overlay uses `?v=4` on script tags.
 
 ### 5. ShadowMount+ only scans when it starts
 
-Titles installed after ShadowMount+ has already run (e.g. from ProsperoStore) **will not appear** on the home screen until you **re-run ShadowMount+** from PAYLOADS.
+Re-run ShadowMount+ from PAYLOADS after installing new titles.
 
 ### 6. Autoload ShadowMount+ and FTP
 
-Otherwise you launch them by hand every boot. Configure autoload in the host page’s `payloads.json` (see upstream docs).
+Configure autoload in `payloads.json` (order = injection priority). See upstream docs.
 
 ### 7. OnionHEN + homebrew title IDs
 
-Homebrew apps you install yourself may need a correct `param.json` and an entry in OnionHEN’s config (`exact_title_ids` / equivalent) or the console shows a generic “something went wrong” dialog. That is outside this DNS/nginx package but bites people next.
+Homebrew may need a correct `param.json` and an OnionHEN config entry, or you get a generic error dialog.
+
+### 8. Plain HTTP containers on a side port are not enough
+
+Publishing the same files on an alternate HTTP port (for example **:8765**) without the SPA `try_files` fallback will **404** on `/document/en/ps5/`. The PS5 User’s Guide talks to **HTTPS :443** on `manuals.playstation.net`. Use the compose `web` service or the Unraid host-nginx drop-in below — not a stock nginx on a random port.
 
 ---
 
 ## Layout
 
 ```
-├── docker-compose.yml          # dnsmasq (host net) + nginx :80/:443
-├── .env.example                # SERVER_IP, upstream DNS, host repo URL
+├── docker-compose.yml
+├── .env.example
+├── overlay/                    # exact page files applied onto pinned WAK1360
+│   ├── index.html
+│   ├── payloads.json           # used by add-ftpsrv.sh
+│   └── src/{firmware,helper,force-ready}.js
 ├── dnsmasq/dnsmasq.conf.template
 ├── nginx/default.conf.template
+├── unraid/
+│   ├── relapse-nginx.conf.template   # host-nginx drop-in (templated IP)
+│   └── apply-nginx.sh
 ├── scripts/
-│   ├── render-config.sh        # templates → dnsmasq.conf + default.conf
-│   ├── generate-cert.sh        # self-signed certs/manuals.{crt,key}
-│   ├── setup-host.sh           # clone upstream → www/ + patch index.html
-│   └── verify.sh               # local sanity checks
+│   ├── render-config.sh
+│   ├── generate-cert.sh
+│   ├── setup-host.sh
+│   ├── add-ftpsrv.sh
+│   └── verify.sh
 └── README.md
 ```
 
-Generated / cloned (gitignored): `.env`, `dnsmasq/dnsmasq.conf`, `nginx/default.conf`, `certs/`, `www/`.
+Generated / cloned (gitignored): `.env`, rendered configs, `certs/`, `www/`.
 
 ---
 
-## Optional: Unraid / existing reverse proxy
+## Optional: Unraid / existing host nginx
 
-If your NAS already runs nginx on 80/443, you can:
+If your NAS already runs nginx on 80/443:
 
 1. Still run the **dns** service from this compose file (or any dnsmasq with the same records).
-2. Drop the contents of `nginx/default.conf.template` (after rendering) into your host nginx as a server block, pointing `root` at the cloned `www/` and the cert paths at wherever you keep `manuals.crt` / `manuals.key`.
-3. Keep the `.js`/`.css` `=404` rule and `Cache-Control: no-store`.
+2. Skip compose `web`, or leave it unpublished.
+3. Render and merge the drop-in:
 
-A small “apply drop-in + nginx -t && reload” script on boot is enough; this repo stays compose-first so it works on plain Docker hosts too.
+```bash
+export SERVER_IP=192.168.1.50
+export WAK_ROOT=/path/to/ps5-relapse-selfhost/www
+export CERT_DIR=/path/to/ps5-relapse-selfhost/certs
+# optional overrides:
+# export DROP_IN=/boot/config/custom/relapse-nginx.conf
+# export NGINX_SERVERS_CONF=/etc/nginx/conf.d/servers.conf
+./unraid/apply-nginx.sh
+```
+
+Keep the `.js`/`.css` `=404` rule and `Cache-Control: no-store`. Re-run the apply script after reboot if your host nginx config is regenerated from drop-ins.
 
 ---
 
 ## Updating the host page
 
 ```bash
-./scripts/setup-host.sh        # git fetch + re-apply patch
-docker compose restart web
+./scripts/setup-host.sh        # re-fetch pinned commit + re-apply overlay
+./scripts/add-ftpsrv.sh        # if you still want FTP
+docker compose restart web     # or re-run unraid/apply-nginx.sh
 ```
 
-To switch upstreams, set `HOST_REPO` / `HOST_REF` in `.env` before running `setup-host.sh`.
+To move the pin, set `HOST_REF` in `.env` and refresh the overlay files so they still apply cleanly.
 
 ---
 
@@ -185,7 +210,7 @@ To switch upstreams, set `HOST_REPO` / `HOST_REF` in `.env` before running `setu
 
 - The self-signed cert is only so the PS5 browser can speak TLS to **you**. Do not reuse it elsewhere.
 - dnsmasq on this host becomes a DNS oracle for anyone pointed at it — keep it on a trusted LAN.
-- Payloads (`*.elf`, `*.bin`) come from upstream clones and stay in `www/` (gitignored). **Never commit them.**
+- Payloads (`*.elf`, `*.bin`) come from upstream clones / release downloads and stay in `www/` (gitignored). **Never commit them.**
 - This repo deliberately contains **no** exploit sources.
 
 ---
@@ -194,7 +219,8 @@ To switch upstreams, set `HOST_REPO` / `HOST_REF` in `.env` before running `setu
 
 - Relapse exploit chain: Sonic_Iso, Jordy, ntfargo, ufm42, Dr. Yenyen, and others listed in [ntfargo/Relapse-Exploit](https://github.com/ntfargo/Relapse-Exploit)
 - WAK1360 host UI: [arg0WAK/WAK1360-Relapse](https://github.com/arg0WAK/WAK1360-Relapse)
-- Payload authors (OnionHEN, ShadowMount+, FTP server, etc.) — see their respective projects
+- ftpsrv: [ps5-payload-dev/ftpsrv](https://github.com/ps5-payload-dev/ftpsrv)
+- Other payload authors (OnionHEN, ShadowMount+, etc.) — see their respective projects
 
 ---
 
