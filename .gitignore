@@ -1,0 +1,23 @@
+# Local secrets and generated material
+.env
+certs/
+*.crt
+*.key
+*.pem
+
+# Rendered from templates (run scripts/render-config.sh)
+dnsmasq/dnsmasq.conf
+nginx/default.conf
+
+# Upstream host page clone (run scripts/setup-host.sh)
+www/
+
+# Payloads / binaries (never commit)
+*.elf
+*.bin
+payloads/
+
+# Editor / OS noise
+.DS_Store
+*.swp
+*~

@@ -1,0 +1,47 @@
+# Generated from default.conf.template — do not edit by hand.
+# Re-run scripts/render-config.sh after changing .env.
+
+# HTTP — some clients hit :80 first
+server {
+    listen 80;
+    server_name manuals.playstation.net manual.playstation.net doc.dl.playstation.net;
+    access_log /var/log/nginx/relapse-access.log;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # The PS5 browser caches aggressively; never let it keep a broken page.
+    add_header Cache-Control "no-store";
+
+    # CRITICAL: do NOT fall back to index.html for missing .js/.css.
+    # A catch-all SPA fallback will serve HTML for firmware.js when the path
+    # is wrong, and the exploit dies silently with no useful error.
+    location ~* \.(js|css)$ {
+        try_files $uri =404;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+
+# HTTPS — the User's Guide loads over HTTPS
+server {
+    listen 443 ssl;
+    server_name manuals.playstation.net manual.playstation.net doc.dl.playstation.net;
+    access_log /var/log/nginx/relapse-access.log;
+
+    ssl_certificate     /etc/nginx/certs/manuals.crt;
+    ssl_certificate_key /etc/nginx/certs/manuals.key;
+
+    root /usr/share/nginx/html;
+    index index.html;
+    add_header Cache-Control "no-store";
+
+    location ~* \.(js|css)$ {
+        try_files $uri =404;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
