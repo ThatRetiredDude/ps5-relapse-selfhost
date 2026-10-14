@@ -42,7 +42,7 @@ fi
 forbid_hits=0
 scan_paths=(.env.example .gitignore README.md docker-compose.yml dnsmasq nginx scripts)
 tokens=(
-  '10.35.'
+  "$(printf '%s%s' '10.' '35.')"
   "$(printf '%s%s' Tow er)"
   "$(printf '%s%s' tai 'l-')"
   "$(printf '%s%s' max well)"
