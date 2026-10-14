@@ -8,6 +8,7 @@ certs/
 # Rendered from templates (run scripts/render-config.sh)
 dnsmasq/dnsmasq.conf
 nginx/default.conf
+unraid/relapse-nginx.conf
 
 # Upstream host page clone (run scripts/setup-host.sh)
 www/

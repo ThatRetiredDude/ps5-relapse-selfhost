@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Clone the upstream Relapse host page into ./www and apply the
-# PS5 User's Guide compatibility patches. Does not vendor exploit code
-# into this repository — the clone stays local (see .gitignore).
+# Clone the upstream WAK1360 host page into ./www, pin a known commit, and
+# apply the local overlay (base href, cache-bust, UA fixes, force-ready).
+# Does not vendor exploit code into this repository — the clone stays local.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -16,78 +16,70 @@ if [[ -f .env ]]; then
 fi
 
 HOST_REPO="${HOST_REPO:-https://github.com/arg0WAK/WAK1360-Relapse.git}"
-HOST_REF="${HOST_REF:-main}"
+# Pin the commit this overlay was built against (override via .env if needed).
+HOST_REF="${HOST_REF:-b2398fd5bea116f990595e0a187ae94d8c6db43d}"
 WWW="${WWW_DIR:-www}"
-CACHE_BUST="${CACHE_BUST:-selfhost}"
+OVERLAY="${OVERLAY_DIR:-overlay}"
 
-if [[ -d "$WWW/.git" ]]; then
-  echo "updating existing clone in $WWW ..."
-  git -C "$WWW" fetch --depth 1 origin "$HOST_REF"
-  git -C "$WWW" checkout -q FETCH_HEAD
-else
-  if [[ -e "$WWW" ]]; then
-    echo "error: $WWW exists but is not a git clone; move it aside and re-run." >&2
-    exit 1
+clone_pinned() {
+  local dest="$1"
+  if [[ -d "$dest/.git" ]]; then
+    echo "updating existing clone in $dest → $HOST_REF ..."
+    git -C "$dest" remote set-url origin "$HOST_REPO" 2>/dev/null || true
+    git -C "$dest" fetch --depth 1 origin "$HOST_REF"
+    git -C "$dest" checkout -q --force FETCH_HEAD
+    git -C "$dest" clean -fdq
+  else
+    if [[ -e "$dest" ]]; then
+      echo "error: $dest exists but is not a git clone; move it aside and re-run." >&2
+      exit 1
+    fi
+    echo "cloning $HOST_REPO @$HOST_REF into $dest ..."
+    mkdir -p "$dest"
+    git -C "$dest" init -q
+    git -C "$dest" remote add origin "$HOST_REPO"
+    git -C "$dest" fetch --depth 1 origin "$HOST_REF"
+    git -C "$dest" checkout -q FETCH_HEAD
   fi
-  echo "cloning $HOST_REPO ($HOST_REF) into $WWW ..."
-  git clone --depth 1 --branch "$HOST_REF" "$HOST_REPO" "$WWW"
-fi
+  echo "checked out $(git -C "$dest" rev-parse HEAD)"
+}
 
-HTML="$WWW/index.html"
-if [[ ! -f "$HTML" ]]; then
-  echo "error: $HTML not found after clone" >&2
+clone_pinned "$WWW"
+
+if [[ ! -d "$OVERLAY" ]]; then
+  echo "error: overlay directory missing: $OVERLAY" >&2
   exit 1
 fi
 
-# Backup once per run
-cp "$HTML" "$HTML.bak-selfhost-$(date +%Y%m%d-%H%M%S)"
-
-# 1. <base href="/"> so deep User's Guide paths like /document/en/ps5/
-#    still resolve ./src/firmware.js and ./assets/* from the site root.
-if ! grep -q '<base href="/">' "$HTML"; then
-  # Insert immediately after <head> or before the first stylesheet link.
-  if grep -q '<link rel="stylesheet"' "$HTML"; then
-    # Use a portable python edit (BSD/GNU sed differ on -i).
-    python3 - "$HTML" <<'PY'
-import sys
-path = sys.argv[1]
-text = open(path, encoding="utf-8").read()
-needle = '<link rel="stylesheet"'
-if '<base href="/">' not in text and needle in text:
-    text = text.replace(needle, '<base href="/">\n  ' + needle, 1)
-    open(path, "w", encoding="utf-8").write(text)
-    print("added <base href=\"/\">")
-else:
-    print("base href already present or stylesheet link missing")
-PY
-  else
-    echo "warning: no stylesheet link found; insert <base href=\"/\"> into <head> by hand" >&2
+echo "applying overlay from $OVERLAY ..."
+# Copy overlay files on top of the pinned upstream tree.
+# Use ditto/cp -R semantics without copying directories that would nest.
+while IFS= read -r -d '' src; do
+  rel="${src#"$OVERLAY"/}"
+  # payloads.json is applied by scripts/add-ftpsrv.sh (optional FTP step)
+  if [[ "$rel" == "payloads.json" ]]; then
+    continue
   fi
-else
-  echo "base href already present"
-fi
+  dst="$WWW/$rel"
+  mkdir -p "$(dirname "$dst")"
+  cp -f "$src" "$dst"
+  echo "  + $rel"
+done < <(find "$OVERLAY" -type f -print0)
 
-# 2. Cache-bust firmware.js so the PS5 browser does not keep a broken copy.
-python3 - "$HTML" "$CACHE_BUST" <<'PY'
-import re, sys
-path, bust = sys.argv[1], sys.argv[2]
-text = open(path, encoding="utf-8").read()
-# Match firmware.js with or without an existing ?v= query
-new, n = re.subn(
-    r'(src=["\']\.?/src/firmware\.js)(?:\?[^"\']*)?(["\'])',
-    rf'\1?v={bust}\2',
-    text,
-    count=1,
-)
-if n:
-    open(path, "w", encoding="utf-8").write(new)
-    print(f"set firmware.js cache-buster to ?v={bust}")
-else:
-    print("warning: firmware.js script tag not found; skip cache-bust", file=sys.stderr)
-PY
+# Sanity: required overlay pieces
+for req in index.html src/firmware.js src/helper.js src/force-ready.js; do
+  if [[ ! -f "$WWW/$req" ]]; then
+    echo "error: missing $WWW/$req after overlay" >&2
+    exit 1
+  fi
+done
 
-echo "--- patch check ---"
-grep -n 'base href' "$HTML" || true
-grep -n 'firmware.js' "$HTML" || true
+echo "--- overlay check ---"
+grep -n 'base href' "$WWW/index.html" || true
+grep -n 'force-ready.js' "$WWW/index.html" || true
+grep -nE 'firmware\.js\?v=4' "$WWW/index.html" || true
+grep -c 'detectFirmware' "$WWW/src/firmware.js" || true
+test -f "$WWW/src/force-ready.js" && echo "force-ready.js present"
+
 echo "host page ready in $WWW/"
-echo "note: payloads (*.elf) come from upstream and stay local; this repo never vendors them."
+echo "optional: ./scripts/add-ftpsrv.sh   # download FTP payload + update payloads.json"

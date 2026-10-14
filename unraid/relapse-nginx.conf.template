@@ -1,0 +1,28 @@
+# Relapse PS5 host — User's Guide
+# Render with scripts/render-config.sh (substitutes SERVER_IP) or sed.
+# Install on an existing host nginx (e.g. Unraid) that already owns :80/:443.
+# A plain nginx container published only on an alternate HTTP port cannot serve
+# the User's Guide deep path (/document/en/ps5/) unless it has the same
+# try_files fallback — and the Guide itself loads over HTTPS on 443.
+server {
+    listen ${SERVER_IP}:80;
+    server_name manuals.playstation.net;
+    access_log /tmp/relapse-access.log;
+    root ${WAK_ROOT};
+    index index.html;
+    add_header Cache-Control "no-store";
+    location ~* \.(js|css)$ { try_files $uri =404; }
+    location / { try_files $uri $uri/ /index.html; }
+}
+server {
+    listen ${SERVER_IP}:443 ssl;
+    server_name manuals.playstation.net;
+    access_log /tmp/relapse-access.log;
+    ssl_certificate     ${CERT_DIR}/manuals.crt;
+    ssl_certificate_key ${CERT_DIR}/manuals.key;
+    root ${WAK_ROOT};
+    index index.html;
+    add_header Cache-Control "no-store";
+    location ~* \.(js|css)$ { try_files $uri =404; }
+    location / { try_files $uri $uri/ /index.html; }
+}
