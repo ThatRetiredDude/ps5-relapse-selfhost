@@ -119,9 +119,9 @@ The User’s Guide loads over **HTTPS**. Serving only port 80 is not enough.
 
 If nginx falls back to `index.html` for missing `.js` files, a bad path returns HTML with HTTP 200 and the exploit dies silently. This package makes `.js` / `.css` return a real **404**.
 
-### 3. Deep User’s Guide paths need a `<base href>`
+### 3. Deep User’s Guide paths are handled on the server
 
-The Guide opens URLs like `/document/en/ps5/…`. The overlay’s `index.html` includes `<base href="/">`.
+The Guide opens URLs like `/document/en/ps5/…`. nginx rewrites nested `/src/` and `/assets/` requests back to the site root, and `try_files` serves `index.html` for the deep HTML path. The overlay still includes `<base href="/">` as an optional client-side backup.
 
 ### 4. The PS5 browser caches aggressively
 
@@ -217,12 +217,11 @@ To move the pin, set `HOST_REF` in `.env` and refresh the overlay files so they 
 
 ## Upstream contributions
 
-Page-side fixes from `overlay/` (firmware/UA detection, real rejection text, `force-ready` fallback, `<base href="/">`) are offered upstream as:
+Broader firmware/UA detection and on-screen rejection text are offered upstream as:
 
-- Fork: [ThatRetiredDude/WAK1360-Relapse](https://github.com/ThatRetiredDude/WAK1360-Relapse)
-- PR: [arg0WAK/WAK1360-Relapse#1](https://github.com/arg0WAK/WAK1360-Relapse/pull/1)
+https://github.com/arg0WAK/WAK1360-Relapse/pull/1
 
-Hosting pieces in this repo (DNS, nginx, Unraid, ftpsrv wiring) stay here and are not part of that PR.
+Deep Guide path rewrites, `<base href="/">`, `force-ready.js`, DNS, Unraid drop-ins, and ftpsrv wiring stay in this kit (server / self-host layer).
 
 ## Credits
 

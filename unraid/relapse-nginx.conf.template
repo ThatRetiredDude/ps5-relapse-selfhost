@@ -11,6 +11,13 @@ server {
     root ${WAK_ROOT};
     index index.html;
     add_header Cache-Control "no-store";
+
+    # Deep User's Guide paths (/document/en/ps5/…) load index via try_files
+    # below, but relative ./src and ./assets then resolve under that deep path.
+    # Rewrite those asset requests back to the site root (server-layer fix;
+    # client <base href="/"> in the overlay is optional belt-and-suspenders).
+    rewrite ^/document/.+/(src|assets)/(.*)$ /$1/$2 last;
+
     location ~* \.(js|css)$ { try_files $uri =404; }
     location / { try_files $uri $uri/ /index.html; }
 }
@@ -23,6 +30,13 @@ server {
     root ${WAK_ROOT};
     index index.html;
     add_header Cache-Control "no-store";
+
+    # Deep User's Guide paths (/document/en/ps5/…) load index via try_files
+    # below, but relative ./src and ./assets then resolve under that deep path.
+    # Rewrite those asset requests back to the site root (server-layer fix;
+    # client <base href="/"> in the overlay is optional belt-and-suspenders).
+    rewrite ^/document/.+/(src|assets)/(.*)$ /$1/$2 last;
+
     location ~* \.(js|css)$ { try_files $uri =404; }
     location / { try_files $uri $uri/ /index.html; }
 }
