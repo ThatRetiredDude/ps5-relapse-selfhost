@@ -12,6 +12,12 @@ server {
     # The PS5 browser caches aggressively; never let it keep a broken page.
     add_header Cache-Control "no-store";
 
+    # Deep User's Guide paths (/document/en/ps5/…) load index via try_files
+    # below, but relative ./src and ./assets then resolve under that deep path.
+    # Rewrite those asset requests back to the site root (server-layer fix;
+    # client <base href="/"> in the overlay is optional belt-and-suspenders).
+    rewrite ^/document/.+/(src|assets)/(.*)$ /$1/$2 last;
+
     # CRITICAL: do NOT fall back to index.html for missing .js/.css.
     # A catch-all SPA fallback will serve HTML for firmware.js when the path
     # is wrong, and the exploit dies silently with no useful error.
@@ -36,6 +42,12 @@ server {
     root /usr/share/nginx/html;
     index index.html;
     add_header Cache-Control "no-store";
+
+    # Deep User's Guide paths (/document/en/ps5/…) load index via try_files
+    # below, but relative ./src and ./assets then resolve under that deep path.
+    # Rewrite those asset requests back to the site root (server-layer fix;
+    # client <base href="/"> in the overlay is optional belt-and-suspenders).
+    rewrite ^/document/.+/(src|assets)/(.*)$ /$1/$2 last;
 
     location ~* \.(js|css)$ {
         try_files $uri =404;
